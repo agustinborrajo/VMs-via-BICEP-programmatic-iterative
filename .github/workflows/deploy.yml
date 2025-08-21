@@ -1,0 +1,58 @@
+#
+# deploy.yml ####
+#
+# deploy.yml deploys the VMs + all associated resources/features created by vm.bicep when consumed/invoked by main.bicep 
+# deploy.yml relies on 5 GitHub Environment Secrets :  SUBSCRIPTION_ID + TENANT_ID + CLIENT_ID + VM_ADMIN_PASSWORD + VM_ADMIN_NAME
+#
+# CLIENT_ID : An Azure Managed Identity is used to deploy to GitHub # Below steps show what needs to be done before committing and pushing from VSCode
+#
+# $managedIdentityName = "bicep-demo-deploy-federation"
+# $subscriptionID = "<YOUR-SUBSCRIPTION-ID>" # az account show # portal.azure.com
+# $resourceGroupName = "VMs-via-BICEP-programmatic-iterative"
+# New-AzResourceGroup -Name "managed-identity" -Location "eastus"
+# Register-AzResourceProvider -ProviderNamespace Microsoft.ManagedIdentity
+# $managedIdentity = New-AzUserAssignedIdentity -Name $managedIdentityName -ResourceGroupName managed-identity -Location eastus
+# New-AzResourceGroup -Name $resourceGroupName -Location eastus
+# $roleAssignment = New-AzRoleAssignment -ObjectId $managedIdentity.PrincipalId -RoleDefinitionName "Contributor" -Scope "/subscriptions/${subscriptionID}/resourceGroups/${resourceGroupName}"
+# $githubOrganization = "agustinborrajo"
+# $environmentName = "deploy"
+# $repoName = "VMs-via-BICEP-programmatic-iterative"
+# $subjectUri = "repo:${githubOrganization}/${repoName}:environment:${environmentName}"
+# New-AzFederatedIdentityCredential -ResourceGroupName managed-identity -IdentityName $managedIdentity.name -Name bicep-demo-federation -Issuer "https://token.actions.githubusercontent.com" -Subject $subjectUri
+# $managedIdentity.ClientID
+#
+
+name: Bicep Deploy
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  Bicep-deploy:
+    name: Run Azure Bicep Deployment
+    runs-on: ubuntu-latest
+    environment: deploy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.CLIENT_ID }}
+          tenant-id: ${{ secrets.TENANT_ID }}
+          subscription-id: ${{ secrets.SUBSCRIPTION_ID }}
+          enable-AzPSSession: true
+
+      - name: Deploy Bicep
+        uses: Azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az deployment group create --name deploy --resource-group ${{ vars.RESOURCE_GROUP }} --template-file ./main.bicep --parameters @./dev.parameters.json --parameters adminPassword='${{ secrets.VM_ADMIN_PASSWORD }}' --parameters adminUsername='${{ secrets.VM_ADMIN_NAME }}' --debug
